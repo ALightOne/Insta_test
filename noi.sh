@@ -9,7 +9,7 @@ github_username=datvance
 #maybe flimsy, could just hard-code it
 project_dir="$( cd "$( dirname "$0" )" && pwd )"
 
-php ${project_dir}/build.php;
+php ${project_dir}/build.php || { echo "build failed, nothing pushed"; exit 1; }
 
 changes=$(git status --short ${project_dir}/docs/index.html);
 
