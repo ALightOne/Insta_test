@@ -1,26 +1,51 @@
 name: Build the Gram
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
   schedule:
-    - cron:  '0 */6 * * *'
+    - cron: '0 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-the-gram
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
-      - name: Create local changes
+      - uses: actions/checkout@v4
+
+      - name: Build page
+        env:
+          # Optional but strongly recommended: the "sessionid" cookie of an Instagram account.
+          # Without it Instagram usually refuses requests coming from GitHub's servers.
+          INSTAGRAM_SESSIONID: ${{ secrets.INSTAGRAM_SESSIONID }}
+          TIMEZONE: Europe/Bucharest
+        # build.php exits non-zero (and leaves docs/index.html untouched) when no posts were fetched,
+        # which fails this step and stops the workflow before anything is pushed.
+        run: php -f ./build.php
+
+      - name: Verify generated page
         run: |
-          composer install --no-interaction --prefer-dist --no-suggest
-          php -f ./build.php
-          changes=$(git status --short ./docs/index.html);
-          if [ -n "$changes" ]; then
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git commit ./docs/index.html -m "GitHub Build ${GITHUB_RUN_NUMBER}"
+          set -euo pipefail
+          count=$(grep -c 'class="tile is-parent"' docs/index.html || true)
+          echo "docs/index.html contains ${count} posts"
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::docs/index.html contains no posts"
+            exit 1
           fi
-      - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain -- docs/index.html)" ]; then
+            echo "::notice::docs/index.html did not change - nothing to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "GitHub Build ${GITHUB_RUN_NUMBER}" -- docs/index.html
+          git push origin "HEAD:${GITHUB_REF_NAME}"
